@@ -123,7 +123,7 @@ const beforeExitListener = () => {
 
 process.on("beforeExit", beforeExitListener);
 
-const CONFIG: Promise<Config> = new Promise((r) => {
+const CONFIG = (): Promise<Config> => new Promise((r) => {
   r({
     _HANDLER: getEnv("_HANDLER"),
     LAMBDA_TASK_ROOT: getEnv("LAMBDA_TASK_ROOT"),
@@ -333,7 +333,7 @@ const processNextRequest = (
 //----- start here
 
 const runtime = (done: Callback) => {
-  CONFIG.then((cfg) => {
+  CONFIG().then((cfg) => {
     getLambdaHandler(cfg).then(
       (handler) => processNextRequest(handler, cfg, done),
       (err) => sendErrorInit(cfg, err).then(() => done(err), done)

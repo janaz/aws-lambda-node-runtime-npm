@@ -1,6 +1,6 @@
 {
   "name": "aws-lambda-node-runtime",
-  "version": "0.0.3",
+  "version": "0.0.7",
   "license": "(MIT OR Apache-2.0)",
   "scripts": {
     "precompile": "rm -rf dist",
@@ -23,6 +23,7 @@
   ],
   "main": "./dist/compile/runtime.js",
   "types": "./dist/compile/runtime.d.ts",
+  "bin": "./dist/compile/bin/index.js",
   "devDependencies": {
     "@types/express": "^4.17.11",
     "@types/node": "^14.14.37",

@@ -3,6 +3,7 @@
   "version": "0.0.7",
   "license": "(MIT OR Apache-2.0)",
   "scripts": {
+    "test": "jest",
     "precompile": "rm -rf dist",
     "compile": "tsc",
     "start-api": "node runtime-api/server",

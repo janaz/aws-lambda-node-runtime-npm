@@ -1,5 +1,5 @@
-import Context from "context";
-import { Callback, ContextBasedFunctionExecutor, LambdaApi, LambdaHeaders, LambdaResponseValue } from "types";
+import Context from "./context";
+import { Callback, ContextBasedFunctionExecutor, LambdaApi, LambdaHeaders, LambdaResponseValue } from "./types";
 
 export const processNextRequest = (
   lambdaApi: LambdaApi,

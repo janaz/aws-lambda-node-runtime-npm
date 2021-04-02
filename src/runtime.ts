@@ -1,8 +1,8 @@
-import { Callback, ContextBasedFunctionExecutor, LambdaApi, LambdaApiResponse, LambdaHandler, LambdaHeaders, LambdaResponseValue } from "./types";
+import { Callback, ContextBasedFunctionExecutor, LambdaApi, LambdaHandler, LambdaHeaders, LambdaResponseValue } from "./types";
 import Context from "./context";
 import getConfig, { Config } from "./config";
 import { request } from "./http";
-import { processNextRequest } from "helpers";
+import { processNextRequest } from "./helpers";
 
 const contextBasedExecutor: ContextBasedFunctionExecutor = {
   execute: (ctx) => (fn) => {

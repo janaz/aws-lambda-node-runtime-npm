@@ -24,3 +24,14 @@ export interface LambdaHeaders {
   "lambda-runtime-cognito-identity": string;
   "lambda-runtime-client-context": string;
 }
+
+export interface ContextBasedFunctionExecutor {
+  execute: (ctx: Context) => (fn: () => void) => void
+}
+
+export interface LambdaApi {
+  fetchNext: () => Promise<LambdaApiResponse>,
+  sendSuccessResponse: (id: string, obj: LambdaResponseValue) => Promise<LambdaApiResponse>,
+  sendErrorResponse: (id: string, err: Error) => Promise<LambdaApiResponse>,
+  sendErrorInit: (err: Error) => Promise<LambdaApiResponse>,
+}

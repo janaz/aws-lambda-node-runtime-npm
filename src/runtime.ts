@@ -1,11 +1,8 @@
-import { Callback, LambdaApiResponse, LambdaHandler, LambdaHeaders, LambdaResponseValue } from "./types";
+import { Callback, ContextBasedFunctionExecutor, LambdaApi, LambdaApiResponse, LambdaHandler, LambdaHeaders, LambdaResponseValue } from "./types";
 import Context from "./context";
 import getConfig, { Config } from "./config";
 import { request } from "./http";
-
-export interface ContextBasedFunctionExecutor {
-  execute: (ctx: Context) => (fn: () => void) => void
-}
+import { processNextRequest } from "helpers";
 
 const contextBasedExecutor: ContextBasedFunctionExecutor = {
   execute: (ctx) => (fn) => {
@@ -31,13 +28,6 @@ const getLambdaHandler = (() => {
     }
   };
 })();
-
-export interface LambdaApi {
-  fetchNext: () => Promise<LambdaApiResponse>,
-  sendSuccessResponse: (id: string, obj: LambdaResponseValue) => Promise<LambdaApiResponse>,
-  sendErrorResponse: (id: string, err: Error) => Promise<LambdaApiResponse>,
-  sendErrorInit: (err: Error) => Promise<LambdaApiResponse>,
-}
 
 type LambdaApiProvider = (cfg: Config) => LambdaApi
 type ContextProvider = (cfg: Config) => (headers: LambdaHeaders) => Context
@@ -108,38 +98,10 @@ const callHandler = (
   });
 };
 
-export const processNextRequest = (
-  lambdaApi: LambdaApi,
-  contextProvider: (header: LambdaHeaders) => Context,
-  caller: (event: any, ctx:Context) => Promise<LambdaResponseValue>,
-  executor: ContextBasedFunctionExecutor,
-  done: Callback
-): void => {
-  lambdaApi.fetchNext().then(({ status, headers: _headers, body }) => {
-    const next = () => processNextRequest(lambdaApi, contextProvider, caller, executor, done);
-    if (status !== 200) {
-      console.warn(
-        `Expected response with status 200, but received ${status}. Retrying...`
-      );
-      return next()
-    }
-    const headers = (_headers as unknown) as LambdaHeaders;
-    const event = JSON.parse(body.toString());
-    process.env._X_AMZN_TRACE_ID = headers["lambda-runtime-trace-id"];
-    const ctx = contextProvider(headers);
-    caller(event, ctx)
-      .then(
-        (val) => () => lambdaApi.sendSuccessResponse(ctx.awsRequestId, val).then(next, done),
-        (err) => () => lambdaApi.sendErrorResponse(ctx.awsRequestId, err).then(next, done),
-      )
-      .then(executor.execute(ctx))
-      .catch(done)
-  }, done);
-};
 
 //----- start here
 
-export const runtime = (done: Callback) => {
+const runtime = (done: Callback) => {
   getConfig().then((cfg) => {
     const lambdaApi = getLambdaHttpApi(cfg);
     const lambdaHandler = getLambdaHandler(cfg);
@@ -154,4 +116,4 @@ export const runtime = (done: Callback) => {
   }, done);
 };
 
-// export = runtime;
+export = runtime;

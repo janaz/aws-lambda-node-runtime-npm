@@ -1,7 +1,7 @@
 import { Config } from '../src/config';
 import Context from '../src/context';
-import {ContextBasedFunctionExecutor, LambdaApi, processNextRequest} from '../src/runtime';
-import { LambdaHeaders, LambdaResponseValue } from '../src/types';
+import { LambdaHeaders, LambdaResponseValue, ContextBasedFunctionExecutor, LambdaApi } from '../src/types';
+import { processNextRequest } from '../src/helpers'
 
 const getTestLambdaApi = (responseRecorder: (id: string, obj: LambdaResponseValue) => void): LambdaApi => {
   let firstInvocation = true;

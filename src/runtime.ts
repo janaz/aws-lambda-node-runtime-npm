@@ -1,236 +1,76 @@
-import http from "http";
+import { Callback, LambdaApiResponse, LambdaHandler, LambdaHeaders, LambdaResponseValue } from "./types";
+import Context from "./context";
+import getConfig, { Config } from "./config";
+import { request } from "./http";
 
-const agent = new http.Agent({
-  keepAlive: true,
-  maxSockets: 1,
-});
-
-type LambdaHandler = (
-  event: object,
-  context: Context,
-  callback: Callback
-) => Promise<object> | void;
-
-type LambdaResponseValue = object | string | number | undefined;
-
-type Callback = (err: null | Error, value?: LambdaResponseValue) => void;
-
-interface Response {
-  status: number;
-  headers: http.IncomingHttpHeaders;
-  body: Buffer;
-}
-interface Config {
-  _HANDLER: string;
-  LAMBDA_TASK_ROOT: string;
-  AWS_LAMBDA_RUNTIME_API: string;
-  AWS_LAMBDA_FUNCTION_NAME: string;
-  AWS_LAMBDA_FUNCTION_VERSION: string;
-  AWS_LAMBDA_FUNCTION_MEMORY_SIZE: number;
-  AWS_LAMBDA_LOG_GROUP_NAME: string;
-  AWS_LAMBDA_LOG_STREAM_NAME: string;
-}
-interface LambdaHeaders {
-  "lambda-runtime-aws-request-id": string;
-  "lambda-runtime-deadline-ms": string;
-  "lambda-runtime-trace-id": string;
-  "lambda-runtime-invoked-function-arn": string;
-  "lambda-runtime-cognito-identity": string;
-  "lambda-runtime-client-context": string;
+interface ContextBasedFunctionExecutor {
+  execute: (ctx: Context) => (fn: () => void) => void
+  reset: () => void
 }
 
-class Context {
-  private waitForEmptyEventLoop: boolean = true;
-  private deadlineMs: number;
-  private clientContextObj: object | undefined;
-  private identityObj: object | undefined;
-  constructor(private headers: LambdaHeaders, private config: Config) {
-    this.deadlineMs = Number.parseInt(
-      headers["lambda-runtime-deadline-ms"],
-      10
-    );
-    this.clientContextObj = parseJson(headers["lambda-runtime-client-context"]);
-    this.identityObj = parseJson(headers["lambda-runtime-cognito-identity"]);
-  }
-  getRemainingTimeInMillis(): number {
-    return this.deadlineMs - new Date().getTime();
-  }
-  get callbackWaitsForEmptyEventLoop(): boolean {
-    return this.waitForEmptyEventLoop;
-  }
-  set callbackWaitsForEmptyEventLoop(val: boolean) {
-    this.waitForEmptyEventLoop = val;
-  }
-  get identity(): object | undefined {
-    return this.identityObj;
-  }
-  get clientContext(): object | undefined {
-    return this.clientContextObj;
-  }
-  get functionName(): string {
-    return this.config.AWS_LAMBDA_FUNCTION_NAME;
-  }
-  get functionVersion(): string {
-    return this.config.AWS_LAMBDA_FUNCTION_VERSION;
-  }
-  get invokedFunctionArn(): string {
-    return this.headers["lambda-runtime-invoked-function-arn"];
-  }
-  get memoryLimitInMB(): number {
-    return this.config.AWS_LAMBDA_FUNCTION_MEMORY_SIZE;
-  }
-  get awsRequestId(): string {
-    return this.headers["lambda-runtime-aws-request-id"];
-  }
-  get logGroupName(): string {
-    return this.config.AWS_LAMBDA_LOG_GROUP_NAME;
-  }
-  get logStreamName(): string {
-    return this.config.AWS_LAMBDA_LOG_STREAM_NAME;
-  }
-}
-
-const parseJson = (value: string | undefined): object | undefined => {
-  if (value) {
-    try {
-      return JSON.parse(value);
-    } catch (e) {
-      return undefined;
+const contextBasedExecutor = ((): ContextBasedFunctionExecutor => {
+  let _invokeBeforeExitFn: (() => void) | null = null;
+  const beforeExitListener = () => {
+    if (_invokeBeforeExitFn) {
+      _invokeBeforeExitFn();
     }
+  };
+  process.on("beforeExit", beforeExitListener);
+  const executor: ContextBasedFunctionExecutor = {
+    execute: (ctx) => (fn: () => void) => {
+      executor.reset();
+      if (ctx.callbackWaitsForEmptyEventLoop) {
+        _invokeBeforeExitFn = fn
+      } else {
+        fn();
+      }
+    },
+    reset: () => {_invokeBeforeExitFn = null}
   }
-  return undefined;
-};
+  return executor;
+})();
 
-const getEnv = (item: keyof Config): string => {
-  if (typeof process.env[item] === "undefined") {
-    throw new Error(`Environment variable ${item} not set`);
-  } else {
-    return process.env[item] as string;
-  }
-};
+const getLambdaHandler = (() => {
+  let _lambdaHandler: LambdaHandler | undefined = undefined;
+  return async (cfg: Config): Promise<LambdaHandler> => {
+    if (typeof _lambdaHandler === "undefined") {
+      const [modName, handlerName] = cfg._HANDLER.split(".");
+      _lambdaHandler = require(`${cfg.LAMBDA_TASK_ROOT}/${modName}`)[handlerName];
+    }
+    if (typeof _lambdaHandler === "function") {
+      return _lambdaHandler;
+    } else {
+      throw new Error("Can't find the handler");
+    }
+  };
+})();
 
-let _invokeBeforeExitFn: (() => void) | null = null;
+interface LambdaApi {
+  fetchNext: () => Promise<LambdaApiResponse>,
+  sendSuccessResponse: (id: string, obj: LambdaResponseValue) => Promise<LambdaApiResponse>,
+  sendErrorResponse: (id: string, err: Error) => Promise<LambdaApiResponse>,
+  sendErrorInit: (err: Error) => Promise<LambdaApiResponse>,
+}
 
-const setInvokeBeforeExit = (fn: (() => void) | null) => {
-  _invokeBeforeExitFn = fn;
-};
+type LambdaApiProvider = (cfg: Config) => LambdaApi
+type ContextProvider = (cfg: Config) => (headers: LambdaHeaders) => Context
 
-const beforeExitListener = () => {
-  if (_invokeBeforeExitFn) {
-    _invokeBeforeExitFn();
-  }
-};
-
-process.on("beforeExit", beforeExitListener);
-
-const CONFIG = (): Promise<Config> => new Promise((r) => {
-  r({
-    _HANDLER: getEnv("_HANDLER"),
-    LAMBDA_TASK_ROOT: getEnv("LAMBDA_TASK_ROOT"),
-    AWS_LAMBDA_RUNTIME_API: getEnv("AWS_LAMBDA_RUNTIME_API"),
-    AWS_LAMBDA_FUNCTION_NAME: getEnv("AWS_LAMBDA_FUNCTION_NAME"),
-    AWS_LAMBDA_FUNCTION_VERSION: getEnv("AWS_LAMBDA_FUNCTION_VERSION"),
-    AWS_LAMBDA_FUNCTION_MEMORY_SIZE: Number.parseInt(
-      getEnv("AWS_LAMBDA_FUNCTION_MEMORY_SIZE"),
-      10
-    ),
-    AWS_LAMBDA_LOG_GROUP_NAME: getEnv("AWS_LAMBDA_LOG_GROUP_NAME"),
-    AWS_LAMBDA_LOG_STREAM_NAME: getEnv("AWS_LAMBDA_LOG_STREAM_NAME"),
+const getContext: ContextProvider = (cfg) => {
+  return (headers) => new Context(headers, cfg)
+}
+const getLambdaHttpApi: LambdaApiProvider = (cfg) => {
+  const r = request(cfg);
+  const errObj = (err: Error) => ({
+    errorMessage: err.message,
+    errorType: err.toString(),
   });
-});
-
-let _lambdaHandler: LambdaHandler | undefined = undefined;
-
-const getLambdaHandler = async (cfg: Config): Promise<LambdaHandler> => {
-  if (typeof _lambdaHandler === "undefined") {
-    const [modName, handlerName] = cfg._HANDLER.split(".");
-    _lambdaHandler = require(`${cfg.LAMBDA_TASK_ROOT}/${modName}`)[handlerName];
+  return {
+    fetchNext: () => r("GET", "/2018-06-01/runtime/invocation/next"),
+    sendSuccessResponse: (id, obj) => r("POST", `/2018-06-01/runtime/invocation/${id}/response`, obj),
+    sendErrorResponse: (id, err) => r("POST", `/2018-06-01/runtime/invocation/${id}/error`, err),
+    sendErrorInit: (err) => r("POST", "/2018-06-01/runtime/init/error", errObj(err)),
   }
-  if (typeof _lambdaHandler === "function") {
-    return _lambdaHandler;
-  } else {
-    throw new Error("Can't find the handler");
-  }
-};
-
-const request = (cfg: Config) => (
-  method: string,
-  path: string,
-  body?: LambdaResponseValue
-): Promise<Response> => {
-  return new Promise((resolve, reject) => {
-    const [host, port] = cfg.AWS_LAMBDA_RUNTIME_API.split(":");
-    const headers: http.OutgoingHttpHeaders = {
-      Accept: "application/json",
-    };
-    let payload: Buffer | undefined;
-    if (typeof body !== "undefined") {
-      payload = Buffer.from(JSON.stringify(body));
-      (headers["Content-Type"] = "application/json"),
-        (headers["Content-Length"] = String(Buffer.byteLength(payload)));
-    }
-    const options: http.RequestOptions = {
-      hostname: host,
-      port: port || 80,
-      agent,
-      path,
-      method,
-      headers,
-    };
-    const req = http.request(options, (response) => {
-      const data: Buffer[] = [];
-
-      // A chunk of data has been recieved.
-      response.on("data", (chunk) => data.push(chunk));
-
-      // The whole response has been received. Print out the result.
-      response.on("end", () => {
-        if (response.complete) {
-          resolve({
-            status: response.statusCode as number,
-            headers: response.headers,
-            body: Buffer.concat(data),
-          });
-        } else {
-          reject(
-            new Error(
-              "The connection was terminated while the message was still being sent"
-            )
-          );
-        }
-      });
-    });
-    req.on("error", reject);
-    if (typeof payload !== "undefined") {
-      req.write(payload);
-    }
-    req.end();
-  });
-};
-
-const errObj = (err: Error) => ({
-  errorMessage: err.message,
-  errorType: err.toString(),
-});
-
-const fetchNext = (cfg: Config) =>
-  request(cfg)("GET", "/2018-06-01/runtime/invocation/next");
-
-const sendSuccessResponse = (
-  cfg: Config,
-  id: string,
-  obj: LambdaResponseValue
-) => request(cfg)("POST", `/2018-06-01/runtime/invocation/${id}/response`, obj);
-
-const sendErrorResponse = (cfg: Config, id: string, err: Error) =>
-  request(cfg)(
-    "POST",
-    `/2018-06-01/runtime/invocation/${id}/error`,
-    errObj(err)
-  );
-
-const sendErrorInit = (cfg: Config, err: Error) =>
-  request(cfg)("POST", `/2018-06-01/runtime/init/error`, errObj(err));
+}
 
 const callHandler = (
   handler: LambdaHandler,
@@ -264,79 +104,66 @@ const callHandler = (
       rejectCalled = true;
       reject(err);
     };
+    const cb: Callback = (err, val) => {
+      if (err) {
+        return wrappedReject(err);
+      }
+      wrappedResolve(val);
+    };
     try {
-      const cb: Callback = (err, val) => {
-        if (err) {
-          wrappedReject(err);
-        } else {
-          wrappedResolve(val);
-        }
-      };
       const retVal = handler.call(null, event, ctx, cb);
       if (typeof retVal === "object" && typeof retVal.then === "function") {
         retVal.then(wrappedResolve, wrappedReject);
       }
     } catch (e) {
-      wrappedReject(e);
+      wrappedReject(e)
     }
   });
 };
 
 const processNextRequest = (
+  lambdaApi: LambdaApi,
   handler: LambdaHandler,
-  cfg: Config,
+  contextProvider: (header: LambdaHeaders) => Context,
+  caller: (event: any, ctx:Context) => Promise<LambdaResponseValue>,
+  executor: ContextBasedFunctionExecutor,
   done: Callback
 ): void => {
-  setInvokeBeforeExit(null);
-  fetchNext(cfg).then(({ status, headers: _headers, body }) => {
+  executor.reset();
+  lambdaApi.fetchNext().then(({ status, headers: _headers, body }) => {
+    const next = () => processNextRequest(lambdaApi, handler, contextProvider, caller, executor, done);
     if (status !== 200) {
       console.warn(
         `Expected response with status 200, but received ${status}. Retrying...`
       );
-      processNextRequest(handler, cfg, done);
+      return next()
     }
     const headers = (_headers as unknown) as LambdaHeaders;
-    const json = JSON.parse(body.toString());
+    const event = JSON.parse(body.toString());
     process.env._X_AMZN_TRACE_ID = headers["lambda-runtime-trace-id"];
-    const ctx = new Context(headers, cfg);
-    callHandler(handler, json, ctx)
+    const ctx = contextProvider(headers);
+    caller(event, ctx)
       .then(
-        //success
-        (val) => {
-          return () => {
-            sendSuccessResponse(cfg, ctx.awsRequestId, val).then(
-              () => processNextRequest(handler, cfg, done),
-              done
-            );
-          };
-        },
-        (err) => {
-          //error
-          return () => {
-            sendErrorResponse(cfg, ctx.awsRequestId, err).then(
-              () => processNextRequest(handler, cfg, done),
-              done
-            );
-          };
-        }
+        (val) => () => lambdaApi.sendSuccessResponse(ctx.awsRequestId, val).then(next, done),
+        (err) => () => lambdaApi.sendErrorResponse(ctx.awsRequestId, err).then(next, done),
       )
-      .then((scheduleNext) => {
-        if (!ctx.callbackWaitsForEmptyEventLoop) {
-          scheduleNext();
-        } else {
-          setInvokeBeforeExit(scheduleNext);
-        }
-      }, done);
+      .then(executor.execute(ctx), done);
   }, done);
 };
 
 //----- start here
 
 const runtime = (done: Callback) => {
-  CONFIG().then((cfg) => {
-    getLambdaHandler(cfg).then(
-      (handler) => processNextRequest(handler, cfg, done),
-      (err) => sendErrorInit(cfg, err).then(() => done(err), done)
+  getConfig().then((cfg) => {
+    const lambdaApi = getLambdaHttpApi(cfg);
+    const lambdaHandler = getLambdaHandler(cfg);
+    const contextProvider = getContext(cfg);
+    lambdaHandler.then(
+      (handler) => {
+        const caller = (event: any, ctx: Context) => callHandler(handler, event, ctx);
+        processNextRequest(lambdaApi, handler, contextProvider, caller, contextBasedExecutor, done);
+      },
+      (err) => lambdaApi.sendErrorInit(err).then(() => done(err), done)
     );
   }, done);
 };

@@ -5,30 +5,17 @@ import { request } from "./http";
 
 interface ContextBasedFunctionExecutor {
   execute: (ctx: Context) => (fn: () => void) => void
-  reset: () => void
 }
 
-const contextBasedExecutor = ((): ContextBasedFunctionExecutor => {
-  let _invokeBeforeExitFn: (() => void) | null = null;
-  const beforeExitListener = () => {
-    if (_invokeBeforeExitFn) {
-      _invokeBeforeExitFn();
+const contextBasedExecutor: ContextBasedFunctionExecutor = {
+  execute: (ctx) => (fn) => {
+    if (ctx.callbackWaitsForEmptyEventLoop) {
+      process.once("beforeExit", () => fn());
+    } else {
+      fn();
     }
-  };
-  process.on("beforeExit", beforeExitListener);
-  const executor: ContextBasedFunctionExecutor = {
-    execute: (ctx) => (fn: () => void) => {
-      executor.reset();
-      if (ctx.callbackWaitsForEmptyEventLoop) {
-        _invokeBeforeExitFn = fn
-      } else {
-        fn();
-      }
-    },
-    reset: () => {_invokeBeforeExitFn = null}
-  }
-  return executor;
-})();
+  },
+};
 
 const getLambdaHandler = (() => {
   let _lambdaHandler: LambdaHandler | undefined = undefined;
@@ -129,7 +116,6 @@ const processNextRequest = (
   executor: ContextBasedFunctionExecutor,
   done: Callback
 ): void => {
-  executor.reset();
   lambdaApi.fetchNext().then(({ status, headers: _headers, body }) => {
     const next = () => processNextRequest(lambdaApi, handler, contextProvider, caller, executor, done);
     if (status !== 200) {

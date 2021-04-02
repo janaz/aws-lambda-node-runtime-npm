@@ -17,7 +17,7 @@ const getEnv = (item: keyof Config): string => {
   }
 };
 
-const getConfig = (): Promise<Config> => Promise.resolve({
+const getConfig = (): Promise<Config> => Promise.resolve().then(() => ({
   _HANDLER: getEnv("_HANDLER"),
   LAMBDA_TASK_ROOT: getEnv("LAMBDA_TASK_ROOT"),
   AWS_LAMBDA_RUNTIME_API: getEnv("AWS_LAMBDA_RUNTIME_API"),
@@ -29,6 +29,6 @@ const getConfig = (): Promise<Config> => Promise.resolve({
   ),
   AWS_LAMBDA_LOG_GROUP_NAME: getEnv("AWS_LAMBDA_LOG_GROUP_NAME"),
   AWS_LAMBDA_LOG_STREAM_NAME: getEnv("AWS_LAMBDA_LOG_STREAM_NAME"),
-})
+}))
 
 export default getConfig

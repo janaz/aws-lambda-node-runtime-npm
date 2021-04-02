@@ -59,3 +59,17 @@ runtime(done);
 # The follow command assumes that there's /path/to/your/app/index.js file that exports the `handler` functions
 npx aws-lambda-node-runtime index.handler
 ```
+
+## Integration tests
+
+Execute the Lambda API test server
+
+```sh
+npx ts-node runtime-api/server
+```
+
+In another terminal execute the runtime with `hello.js` as the Lambda source
+
+```sh
+npx ts-node integration/test
+```

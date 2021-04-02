@@ -1,4 +1,4 @@
-import runtime from '../src/runtime'
+import {runtime} from '../src/runtime'
 
 process.env._HANDLER = "hello.handler";
 process.env.LAMBDA_TASK_ROOT = __dirname

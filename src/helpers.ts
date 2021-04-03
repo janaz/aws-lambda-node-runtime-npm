@@ -18,7 +18,12 @@ export const processNextRequest = (
     }
     const headers = (_headers as unknown) as LambdaHeaders;
     const event = JSON.parse(body.toString());
-    process.env._X_AMZN_TRACE_ID = headers["lambda-runtime-trace-id"];
+    if (headers["lambda-runtime-trace-id"]) {
+      process.env['_X_AMZN_TRACE_ID'] = headers["lambda-runtime-trace-id"];
+    } else {
+      delete process.env['_X_AMZN_TRACE_ID']
+    }
+
     const ctx = contextProvider(headers);
     caller(event, ctx)
       .then(

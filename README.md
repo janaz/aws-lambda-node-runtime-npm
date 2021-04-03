@@ -3,9 +3,11 @@
 AWS Lambda runtime API implemented in Node.js.
 
 This library can be used to implement
+
 - a custom runtime Lambda layer for any Node.js version
 - a container runtime with Node.js as the execution environment
 - to test your Node.js lambda functions locally
+
 ## Goals
 
 - Provide a robust custom Node.js execution environment

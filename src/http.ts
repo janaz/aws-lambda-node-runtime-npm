@@ -20,8 +20,8 @@ export const request = (cfg: Config) => (
     let payload: Buffer | undefined;
     if (typeof body !== "undefined") {
       payload = Buffer.from(JSON.stringify(body));
-      (headers["Content-Type"] = "application/json"),
-        (headers["Content-Length"] = String(Buffer.byteLength(payload)));
+      headers["Content-Type"] = "application/json";
+      headers["Content-Length"] = String(Buffer.byteLength(payload));
     }
     const options: http.RequestOptions = {
       hostname: host,

@@ -1,6 +1,6 @@
 {
   "name": "aws-lambda-node-runtime",
-  "version": "0.0.8",
+  "version": "0.1.0",
   "license": "(MIT OR Apache-2.0)",
   "scripts": {
     "test": "jest",
